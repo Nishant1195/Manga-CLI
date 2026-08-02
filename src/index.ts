@@ -1,9 +1,10 @@
 #!/usr/bin/env -S npx tsx
 import * as readline from "readline";
 import { WeebCentralSource } from "./sources/weebcentral";
-import { downloadPages } from "./download";
-import { viewChapter } from "./viewer";
+import { downloadPagesProgressive } from "./download";
+import { viewChapterProgressive, viewChapter } from "./viewer";
 import { selectFromList } from "./select";
+import { cleanExpiredCache } from "./cache";
 
 async function askSearchTerm(): Promise<string> {
   const rl = readline.createInterface({
@@ -21,6 +22,8 @@ async function askSearchTerm(): Promise<string> {
 
 async function main() {
   try {
+    cleanExpiredCache();
+
     let query = process.argv[2];
 
     if (!query || !query.trim()) {
@@ -82,9 +85,27 @@ async function main() {
     const destDir = `/tmp/manga-cli/weebcentral/${selectedChapter.id}`;
     console.log(`Downloading ${pageUrls.length} pages...`);
 
-    await downloadPages(pageUrls, destDir);
+    let viewPromise: Promise<void> | null = null;
 
-    await viewChapter(destDir);
+    const downloadPromise = downloadPagesProgressive(
+      pageUrls,
+      destDir,
+      () => {
+        console.log(`[DEBUG] index.ts onThreshold callback triggered! Launching viewChapterProgressive...`);
+        viewPromise = viewChapterProgressive(destDir, downloadPromise);
+      },
+      50
+    );
+
+    const downloadedFiles = await downloadPromise;
+
+    if (!viewPromise) {
+      // If full cache hit or threshold did not fire separately before completion
+      console.log(`[DEBUG] Cache hit or instant completion. Launching standard viewChapter...`);
+      viewPromise = viewChapter(destDir);
+    }
+
+    await viewPromise;
   } catch (error: any) {
     const errorMsg = error?.message || String(error);
     console.error(`Error: ${errorMsg}`);

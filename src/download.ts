@@ -15,22 +15,23 @@ const DEFAULT_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 };
 
-export async function downloadPages(
+export async function downloadPagesProgressive(
   urls: string[],
   destDir: string,
+  onThreshold?: () => void,
+  thresholdPercent: number = 50,
   headers: Record<string, string> = DEFAULT_HEADERS
 ): Promise<string[]> {
   if (!urls || urls.length === 0) {
     return [];
   }
 
-  // Ensure output directory exists
   fs.mkdirSync(destDir, { recursive: true });
 
   const total = urls.length;
   const padLength = Math.max(3, String(total).length);
+  const thresholdCount = Math.ceil((total * thresholdPercent) / 100);
 
-  // Compute expected filenames & extensions
   const expectedPaths: string[] = urls.map((url, idx) => {
     const parsedUrl = new URL(url);
     let ext = path.extname(parsedUrl.pathname);
@@ -41,7 +42,6 @@ export async function downloadPages(
     return path.join(destDir, filename);
   });
 
-  // Basic caching check: if all expected files already exist, return them directly
   const allCached = expectedPaths.every((filePath) => fs.existsSync(filePath));
   if (allCached) {
     console.log(`Using cached pages (${total}/${total}).`);
@@ -52,6 +52,7 @@ export async function downloadPages(
   const failedUrls: { index: number; url: string; error: string }[] = [];
   let completedCount = 0;
   let totalBytesDownloaded = 0;
+  let thresholdFired = false;
   const CONCURRENCY = 20;
   const overallStartTime = Date.now();
 
@@ -61,6 +62,7 @@ export async function downloadPages(
     if (fs.existsSync(targetPath)) {
       downloadedPaths[index] = targetPath;
       completedCount++;
+      checkThreshold();
       process.stdout.write(
         `\rDownloading pages: ${completedCount}/${total}           `
       );
@@ -82,13 +84,27 @@ export async function downloadPages(
       failedUrls.push({ index: index + 1, url, error: errorMsg });
     } finally {
       completedCount++;
+      checkThreshold();
       process.stdout.write(
         `\rDownloading pages: ${completedCount}/${total}           `
       );
     }
   };
 
-  // Process in concurrent batches of CONCURRENCY (5)
+  const checkThreshold = () => {
+    if (
+      !thresholdFired &&
+      completedCount >= thresholdCount &&
+      onThreshold
+    ) {
+      thresholdFired = true;
+      console.log(
+        `\n[DEBUG] onThreshold() firing! completedCount=${completedCount}, thresholdCount=${thresholdCount} (${thresholdPercent}%)`
+      );
+      onThreshold();
+    }
+  };
+
   for (let i = 0; i < urls.length; i += CONCURRENCY) {
     const batch = urls
       .slice(i, i + CONCURRENCY)
@@ -96,7 +112,6 @@ export async function downloadPages(
     await Promise.all(batch);
   }
 
-  // End carriage return line
   process.stdout.write("\n");
 
   const totalElapsedMs = Date.now() - overallStartTime;
@@ -114,4 +129,12 @@ export async function downloadPages(
   }
 
   return validDownloaded;
+}
+
+export async function downloadPages(
+  urls: string[],
+  destDir: string,
+  headers: Record<string, string> = DEFAULT_HEADERS
+): Promise<string[]> {
+  return downloadPagesProgressive(urls, destDir, undefined, 50, headers);
 }
