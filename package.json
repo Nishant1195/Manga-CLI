@@ -1,0 +1,22 @@
+{
+  "name": "manga-cli",
+  "version": "1.0.0",
+  "description": "Minimal TypeScript Node.js CLI project for Manga",
+  "main": "src/index.ts",
+  "bin": {
+    "manga-cli": "src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/cheerio": "^0.22.35",
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0"
+  }
+}
