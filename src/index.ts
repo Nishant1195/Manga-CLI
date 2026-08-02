@@ -79,7 +79,7 @@ async function main() {
       return;
     }
 
-    const destDir = `/tmp/manga-cli/${selectedChapter.id}`;
+    const destDir = `/tmp/manga-cli/weebcentral/${selectedChapter.id}`;
     console.log(`Downloading ${pageUrls.length} pages...`);
 
     await downloadPages(pageUrls, destDir);
