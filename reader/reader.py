@@ -5,29 +5,25 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gtk, Gdk, GLib, Gio
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gtk, Gdk, GLib, Gio, GdkPixbuf
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 
 
 class MangaReaderWindow(Gtk.ApplicationWindow):
     def __init__(self, app, target_dir):
-        super().__init__(application=app, title="Manga Reader (Debug Styling)")
+        super().__init__(application=app, title="Manga Reader")
         self.set_default_size(900, 1200)
 
         self.target_dir = os.path.abspath(target_dir)
         self.loaded_files = set()
+        self.picture_records = []  # List of tuples: (picture_widget, orig_width, orig_height)
 
-        # Debug CSS styling:
-        # Window & ScrolledWindow background: Dark Red (#4a0d0d)
-        # Gtk.Box background: Bright Blue (#0055ff) to visualize Box boundary
+        # Dark theme styling
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(
-            b"""
-            window, scrolledwindow, viewport { background-color: #4a0d0d; }
-            .debug-box { background-color: #0055ff; }
-            picture { background-color: #00ff66; }
-            """
+            b"window, scrolledwindow, viewport { background-color: #121212; }"
         )
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(),
@@ -43,8 +39,7 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
 
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.box.set_hexpand(True)
-        self.box.set_halign(Gtk.Align.CENTER)
-        self.box.add_css_class("debug-box")
+        self.box.set_halign(Gtk.Align.FILL)
 
         self.scrolled_window.set_child(self.box)
         self.set_child(self.scrolled_window)
@@ -53,6 +48,10 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self.on_key_pressed)
         self.add_controller(key_controller)
+
+        # Listen for window resize signal to recalculate image size requests dynamically
+        self.connect("notify::default-width", self.on_window_resized)
+        self.connect("notify::default-height", self.on_window_resized)
 
         # Initial folder scan
         self.poll_folder()
@@ -65,6 +64,22 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
             self.close()
             return True
         return False
+
+    def get_container_target_width(self):
+        win_width = self.get_width()
+        return win_width if win_width > 0 else 900
+
+    def update_picture_size_request(self, picture, orig_width, orig_height, target_width):
+        if orig_width <= 0 or orig_height <= 0:
+            return
+        # Calculate aspect-ratio height for target width
+        target_height = int(round(orig_height * (target_width / orig_width)))
+        picture.set_size_request(target_width, target_height)
+
+    def on_window_resized(self, widget, param):
+        target_width = self.get_container_target_width()
+        for picture, orig_width, orig_height in self.picture_records:
+            self.update_picture_size_request(picture, orig_width, orig_height, target_width)
 
     def poll_folder(self):
         if not os.path.exists(self.target_dir):
@@ -87,13 +102,30 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         if not new_files:
             return True
 
+        container_width = self.get_container_target_width()
+
         for filename in new_files:
             file_path = os.path.join(self.target_dir, filename)
+
+            # 1. Read real image pixel dimensions via GdkPixbuf.Pixbuf.get_file_info
+            orig_width, orig_height = 0, 0
+            try:
+                info, w, h = GdkPixbuf.Pixbuf.get_file_info(file_path)
+                if info and w > 0 and h > 0:
+                    orig_width, orig_height = w, h
+            except Exception as err:
+                print(f"Warning: Could not read image dimensions for {filename}: {err}")
+
             gfile = Gio.File.new_for_path(file_path)
             picture = Gtk.Picture.new_for_file(gfile)
             picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-            picture.set_can_shrink(False)
-            picture.set_halign(Gtk.Align.CENTER)
+            picture.set_halign(Gtk.Align.FILL)
+            picture.set_hexpand(True)
+
+            # 2. Explicitly set size request based on target width & aspect ratio
+            if orig_width > 0 and orig_height > 0:
+                self.update_picture_size_request(picture, orig_width, orig_height, container_width)
+                self.picture_records.append((picture, orig_width, orig_height))
 
             self.box.append(picture)
             self.loaded_files.add(filename)
@@ -103,7 +135,7 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
 
 class MangaReaderApp(Gtk.Application):
     def __init__(self, target_dir):
-        super().__init__(application_id="org.mangacli.reader.debug")
+        super().__init__(application_id="org.mangacli.reader")
         self.target_dir = target_dir
 
     def do_activate(self):

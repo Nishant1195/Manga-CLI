@@ -2,6 +2,43 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
 
+const READER_SCRIPT_PATH = path.resolve(__dirname, "../reader/reader.py");
+
+export async function viewChapter(dir: string): Promise<void> {
+  if (!fs.existsSync(dir)) {
+    throw new Error(`Directory does not exist: ${dir}`);
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const readerProc = spawn("python3", [READER_SCRIPT_PATH, dir], {
+      stdio: "inherit",
+    });
+
+    readerProc.on("error", (err) => {
+      console.error("Failed to start GTK4 Python reader process:", err.message);
+      reject(err);
+    });
+
+    readerProc.on("close", () => {
+      resolve();
+    });
+  });
+}
+
+export async function viewChapterProgressive(
+  dir: string,
+  _allPagesDownloadedPromise: Promise<string[]>
+): Promise<void> {
+  // Since reader.py polls the directory every 1s and appends new images
+  // automatically while preserving scroll position, we directly spawn viewChapter!
+  return viewChapter(dir);
+}
+
+/*
+ ============================================================================
+ UNUSED / LEGACY FEH VIEWER IMPLEMENTATION (Preserved for Fallback Capability)
+ ============================================================================
+
 const FEH_CONFIG_DIR = "/tmp/manga-cli/feh_config";
 
 function ensureFehKeysConfig(): string {
@@ -74,63 +111,4 @@ function spawnFeh(dir: string, startAtFile?: string): Promise<void> {
     });
   });
 }
-
-export async function viewChapter(dir: string): Promise<void> {
-  if (!fs.existsSync(dir)) {
-    throw new Error(`Directory does not exist: ${dir}`);
-  }
-
-  const files = fs.readdirSync(dir).filter((file) => !file.startsWith("."));
-  if (files.length === 0) {
-    console.log(`No images found in directory: ${dir}`);
-    return;
-  }
-
-  await spawnFeh(dir);
-}
-
-export async function viewChapterProgressive(
-  dir: string,
-  allPagesDownloadedPromise: Promise<string[]>
-): Promise<void> {
-  console.log(`[DEBUG] viewChapterProgressive called for dir: ${dir}`);
-
-  if (!fs.existsSync(dir)) {
-    console.log(`Directory does not exist yet for progressive viewing: ${dir}`);
-  }
-
-  // 1. Launch feh on initial batch of pages available right now
-  await spawnFeh(dir);
-
-  // 2. Wait for full download to finish if not already done
-  const allDownloadedFiles = await allPagesDownloadedPromise;
-
-  // 3. Check last viewed file
-  const lastViewed = getLastViewedPage(dir);
-  console.log(`[DEBUG] Batch 1 feh closed. Last viewed file: ${lastViewed}`);
-
-  if (lastViewed && allDownloadedFiles.length > 0) {
-    // Find files in directory sorted
-    const sortedFiles = fs
-      .readdirSync(dir)
-      .filter((file) => !file.startsWith("."))
-      .sort();
-
-    const lastIdx = sortedFiles.indexOf(lastViewed);
-    if (lastIdx !== -1 && lastIdx < sortedFiles.length - 1) {
-      const nextFile = sortedFiles[lastIdx + 1];
-      console.log(`[DEBUG] Relaunching feh starting at next page: ${nextFile}`);
-      await spawnFeh(dir, nextFile);
-    }
-  }
-
-  // Clean up .last-viewed state file
-  try {
-    const lastViewedFile = path.join(dir, ".last-viewed");
-    if (fs.existsSync(lastViewedFile)) {
-      fs.unlinkSync(lastViewedFile);
-    }
-  } catch {
-    // Ignore cleanup error
-  }
-}
+*/
