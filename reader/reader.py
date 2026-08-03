@@ -19,6 +19,15 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         self.target_dir = os.path.abspath(target_dir)
         self.loaded_files = set()
         self.picture_records = []  # List of tuples: (picture_widget, orig_width, orig_height)
+        self.zoom_level = 1.0
+
+        # Clean up any leftover signal file at launch
+        signal_file = os.path.join(self.target_dir, ".chapter-nav-signal")
+        if os.path.exists(signal_file):
+            try:
+                os.remove(signal_file)
+            except Exception:
+                pass
 
         # Dark theme styling
         css_provider = Gtk.CssProvider()
@@ -35,7 +44,8 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         self.scrolled_window = Gtk.ScrolledWindow()
         self.scrolled_window.set_hexpand(True)
         self.scrolled_window.set_vexpand(True)
-        self.scrolled_window.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # Enable horizontal scrolling so zoomed images can pan horizontally
+        self.scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
 
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.box.set_hexpand(True)
@@ -44,7 +54,7 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         self.scrolled_window.set_child(self.box)
         self.set_child(self.scrolled_window)
 
-        # Keypress controller ('q' to quit)
+        # Keypress controller ('q' to quit, +/- for zoom, Left/Right for pan, [/] for prev/next chapter)
         key_controller = Gtk.EventControllerKey()
         key_controller.connect("key-pressed", self.on_key_pressed)
         self.add_controller(key_controller)
@@ -59,15 +69,58 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         # Timer for polling folder every 1 second
         GLib.timeout_add(1000, self.poll_folder)
 
+    def write_nav_signal_and_close(self, signal_type):
+        signal_file = os.path.join(self.target_dir, ".chapter-nav-signal")
+        try:
+            with open(signal_file, "w", encoding="utf-8") as f:
+                f.write(signal_type)
+        except Exception as e:
+            print(f"Error writing chapter navigation signal: {e}")
+        self.close()
+
     def on_key_pressed(self, controller, keyval, keycode, state):
         if keyval == Gdk.KEY_q:
             self.close()
             return True
+        elif keyval == Gdk.KEY_bracketright:  # ']' for next chapter
+            self.write_nav_signal_and_close("next")
+            return True
+        elif keyval == Gdk.KEY_bracketleft:  # '[' for previous chapter
+            self.write_nav_signal_and_close("prev")
+            return True
+        elif keyval in (Gdk.KEY_equal, Gdk.KEY_plus, Gdk.KEY_KP_Add):
+            self.change_zoom(0.1)
+            return True
+        elif keyval in (Gdk.KEY_minus, Gdk.KEY_KP_Subtract):
+            self.change_zoom(-0.1)
+            return True
+        elif keyval == Gdk.KEY_Left:
+            hadj = self.scrolled_window.get_hadjustment()
+            if hadj:
+                hadj.set_value(max(hadj.get_lower(), hadj.get_value() - 80))
+            return True
+        elif keyval == Gdk.KEY_Right:
+            hadj = self.scrolled_window.get_hadjustment()
+            if hadj:
+                max_scroll = hadj.get_upper() - hadj.get_page_size()
+                hadj.set_value(min(max_scroll, hadj.get_value() + 80))
+            return True
         return False
 
-    def get_container_target_width(self):
+    def change_zoom(self, delta):
+        new_zoom = round(self.zoom_level + delta, 2)
+        new_zoom = max(0.5, min(3.0, new_zoom))
+        if new_zoom != self.zoom_level:
+            self.zoom_level = new_zoom
+            self.apply_zoom_and_resize()
+
+    def get_container_base_width(self):
         win_width = self.get_width()
         return win_width if win_width > 0 else 900
+
+    def get_target_width(self):
+        base_width = self.get_container_base_width()
+        return int(round(base_width * self.zoom_level))
 
     def update_picture_size_request(self, picture, orig_width, orig_height, target_width):
         if orig_width <= 0 or orig_height <= 0:
@@ -76,10 +129,13 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         target_height = int(round(orig_height * (target_width / orig_width)))
         picture.set_size_request(target_width, target_height)
 
-    def on_window_resized(self, widget, param):
-        target_width = self.get_container_target_width()
+    def apply_zoom_and_resize(self):
+        target_width = self.get_target_width()
         for picture, orig_width, orig_height in self.picture_records:
             self.update_picture_size_request(picture, orig_width, orig_height, target_width)
+
+    def on_window_resized(self, widget, param):
+        self.apply_zoom_and_resize()
 
     def poll_folder(self):
         if not os.path.exists(self.target_dir):
@@ -102,12 +158,12 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         if not new_files:
             return True
 
-        container_width = self.get_container_target_width()
+        target_width = self.get_target_width()
 
         for filename in new_files:
             file_path = os.path.join(self.target_dir, filename)
 
-            # 1. Read real image pixel dimensions via GdkPixbuf.Pixbuf.get_file_info
+            # Read real image pixel dimensions via GdkPixbuf.Pixbuf.get_file_info
             orig_width, orig_height = 0, 0
             try:
                 info, w, h = GdkPixbuf.Pixbuf.get_file_info(file_path)
@@ -122,9 +178,9 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
             picture.set_halign(Gtk.Align.FILL)
             picture.set_hexpand(True)
 
-            # 2. Explicitly set size request based on target width & aspect ratio
+            # Set size request according to current zoom level & target width
             if orig_width > 0 and orig_height > 0:
-                self.update_picture_size_request(picture, orig_width, orig_height, container_width)
+                self.update_picture_size_request(picture, orig_width, orig_height, target_width)
                 self.picture_records.append((picture, orig_width, orig_height))
 
             self.box.append(picture)

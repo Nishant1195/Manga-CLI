@@ -1,4 +1,6 @@
 #!/usr/bin/env -S npx tsx
+import * as fs from "fs";
+import * as path from "path";
 import * as readline from "readline";
 import { WeebCentralSource } from "./sources/weebcentral";
 import { downloadPagesProgressive } from "./download";
@@ -74,38 +76,83 @@ async function main() {
       return;
     }
 
-    console.log(`Fetching page URLs for Chapter ${selectedChapter.chapter}...`);
-    const pageUrls = await source.getPages(selectedChapter.id);
-
-    if (!pageUrls || pageUrls.length === 0) {
-      console.log("No page URLs found for this chapter.");
-      return;
-    }
-
-    const destDir = `/tmp/manga-cli/weebcentral/${selectedChapter.id}`;
-    console.log(`Downloading ${pageUrls.length} pages...`);
-
-    let viewPromise: Promise<void> | null = null;
-
-    const downloadPromise = downloadPagesProgressive(
-      pageUrls,
-      destDir,
-      () => {
-        console.log(`[DEBUG] index.ts onThreshold callback triggered! Launching viewChapterProgressive...`);
-        viewPromise = viewChapterProgressive(destDir, downloadPromise);
-      },
-      50
+    let currentChapterIndex = chapters.findIndex(
+      (c) => c.id === selectedChapter.id
     );
-
-    const downloadedFiles = await downloadPromise;
-
-    if (!viewPromise) {
-      // If full cache hit or threshold did not fire separately before completion
-      console.log(`[DEBUG] Cache hit or instant completion. Launching standard viewChapter...`);
-      viewPromise = viewChapter(destDir);
+    if (currentChapterIndex === -1) {
+      currentChapterIndex = 0;
     }
 
-    await viewPromise;
+    // Main chapter reading loop for seamless next/prev navigation
+    while (true) {
+      const activeChapter = chapters[currentChapterIndex];
+      console.log(
+        `\nOpening Chapter ${activeChapter.chapter}${
+          activeChapter.title ? " - " + activeChapter.title : ""
+        }...`
+      );
+
+      const pageUrls = await source.getPages(activeChapter.id);
+
+      if (!pageUrls || pageUrls.length === 0) {
+        console.log("No page URLs found for this chapter.");
+        break;
+      }
+
+      const destDir = `/tmp/manga-cli/weebcentral/${activeChapter.id}`;
+      console.log(`Downloading ${pageUrls.length} pages...`);
+
+      let viewPromise: Promise<void> | null = null;
+
+      const downloadPromise = downloadPagesProgressive(
+        pageUrls,
+        destDir,
+        () => {
+          viewPromise = viewChapterProgressive(destDir, downloadPromise);
+        },
+        50
+      );
+
+      await downloadPromise;
+
+      if (!viewPromise) {
+        // If full cache hit or instant completion
+        viewPromise = viewChapter(destDir);
+      }
+
+      await viewPromise;
+
+      // Check for navigation signal file written by reader.py
+      const signalFile = path.join(destDir, ".chapter-nav-signal");
+      let navSignal: string | null = null;
+
+      if (fs.existsSync(signalFile)) {
+        try {
+          navSignal = fs.readFileSync(signalFile, "utf8").trim();
+          fs.unlinkSync(signalFile);
+        } catch {
+          // Ignore read/unlink error
+        }
+      }
+
+      if (navSignal === "next") {
+        if (currentChapterIndex < chapters.length - 1) {
+          currentChapterIndex++;
+        } else {
+          console.log("Already at the latest chapter.");
+        }
+      } else if (navSignal === "prev") {
+        if (currentChapterIndex > 0) {
+          currentChapterIndex--;
+        } else {
+          console.log("Already at the first chapter.");
+        }
+      } else {
+        // User quit normally via 'q' or window close button
+        console.log("Exiting reader.");
+        break;
+      }
+    }
   } catch (error: any) {
     const errorMsg = error?.message || String(error);
     console.error(`Error: ${errorMsg}`);
