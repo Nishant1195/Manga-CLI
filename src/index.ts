@@ -9,6 +9,7 @@ import { selectFromList } from "./select";
 import { cleanExpiredCache } from "./cache";
 import { saveHistoryEntry, getMostRecentlyRead } from "./history";
 import { loadConfig, updateConfigValue } from "./config";
+import { runHealthCheck } from "./health";
 
 function printSetupHelp() {
   console.log("Usage:");
@@ -73,6 +74,11 @@ async function askSearchTerm(): Promise<string> {
 
 async function main() {
   try {
+    if (process.argv.includes("--health") || process.argv.includes("--doctor")) {
+      const ok = await runHealthCheck();
+      process.exit(ok ? 0 : 1);
+    }
+
     if (await handleSetup()) {
       return;
     }
