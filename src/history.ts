@@ -7,6 +7,7 @@ export interface HistoryEntry {
   mangaTitle: string;
   chapterId: string;
   chapterLabel: string;
+  lastPageFile?: string;
   timestamp: number;
 }
 
@@ -31,7 +32,8 @@ export function saveHistoryEntry(
   mangaId: string,
   mangaTitle: string,
   chapterId: string,
-  chapterLabel: string
+  chapterLabel: string,
+  lastPageFile?: string
 ): void {
   try {
     const history = loadHistory();
@@ -40,6 +42,7 @@ export function saveHistoryEntry(
       mangaTitle,
       chapterId,
       chapterLabel,
+      ...(lastPageFile ? { lastPageFile } : {}),
       timestamp: Date.now(),
     };
 

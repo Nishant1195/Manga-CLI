@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import argparse
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -9,25 +10,30 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gtk, Gdk, GLib, Gio, GdkPixbuf
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+BOX_SPACING = 8  # Matches Gtk.Box spacing=8
 
 
 class MangaReaderWindow(Gtk.ApplicationWindow):
-    def __init__(self, app, target_dir):
+    def __init__(self, app, target_dir, start_page=None):
         super().__init__(application=app, title="Manga Reader")
         self.set_default_size(900, 1200)
 
         self.target_dir = os.path.abspath(target_dir)
+        self.start_page = start_page
+        self.has_scrolled_to_start_page = False
         self.loaded_files = set()
-        self.picture_records = []  # List of tuples: (picture_widget, orig_width, orig_height)
+        # List of tuples: (filename, picture_widget, orig_width, orig_height)
+        self.picture_records = []
         self.zoom_level = 1.0
 
-        # Clean up any leftover signal file at launch
-        signal_file = os.path.join(self.target_dir, ".chapter-nav-signal")
-        if os.path.exists(signal_file):
-            try:
-                os.remove(signal_file)
-            except Exception:
-                pass
+        # Clean up any leftover signal files at launch
+        for sig_name in (".chapter-nav-signal", ".last-read-page"):
+            sig_file = os.path.join(self.target_dir, sig_name)
+            if os.path.exists(sig_file):
+                try:
+                    os.remove(sig_file)
+                except Exception:
+                    pass
 
         # Dark theme styling
         css_provider = Gtk.CssProvider()
@@ -47,12 +53,15 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
         # Enable horizontal scrolling so zoomed images can pan horizontally
         self.scrolled_window.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
 
-        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=BOX_SPACING)
         self.box.set_hexpand(True)
         self.box.set_halign(Gtk.Align.FILL)
 
         self.scrolled_window.set_child(self.box)
         self.set_child(self.scrolled_window)
+
+        # Connect window close request event to ensure .last-read-page is saved on ALL exit paths
+        self.connect("close-request", self.on_close_request)
 
         # Keypress controller ('q' to quit, +/- for zoom, Left/Right for pan, [/] for prev/next chapter)
         key_controller = Gtk.EventControllerKey()
@@ -68,6 +77,42 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
 
         # Timer for polling folder every 1 second
         GLib.timeout_add(1000, self.poll_folder)
+
+    def save_last_read_page(self):
+        if not self.picture_records:
+            return
+
+        vadj = self.scrolled_window.get_vadjustment()
+        scroll_y = vadj.get_value() if vadj else 0
+
+        target_width = self.get_target_width()
+        current_y = 0
+        active_filename = self.picture_records[-1][0]  # Fallback to last loaded picture
+
+        for idx, (filename, _picture, orig_w, orig_h) in enumerate(self.picture_records):
+            if orig_w > 0 and orig_h > 0:
+                height = int(round(orig_h * (target_width / orig_w)))
+            else:
+                height = 0
+
+            y_start = current_y
+            y_end = current_y + height
+
+            if y_start <= scroll_y < y_end:
+                active_filename = filename
+
+            current_y += height + BOX_SPACING
+
+        last_page_file = os.path.join(self.target_dir, ".last-read-page")
+        try:
+            with open(last_page_file, "w", encoding="utf-8") as f:
+                f.write(active_filename)
+        except Exception as e:
+            print(f"Error writing .last-read-page: {e}")
+
+    def on_close_request(self, window):
+        self.save_last_read_page()
+        return False  # Allow window close to proceed
 
     def write_nav_signal_and_close(self, signal_type):
         signal_file = os.path.join(self.target_dir, ".chapter-nav-signal")
@@ -116,7 +161,8 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
 
     def get_container_base_width(self):
         win_width = self.get_width()
-        return win_width if win_width > 0 else 900
+        # GTK4 allocates 0px before win.present(); fallback to set_default_size allocation (795px usable width)
+        return win_width if win_width > 0 else 795
 
     def get_target_width(self):
         base_width = self.get_container_base_width()
@@ -125,17 +171,42 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
     def update_picture_size_request(self, picture, orig_width, orig_height, target_width):
         if orig_width <= 0 or orig_height <= 0:
             return
-        # Calculate aspect-ratio height for target width
         target_height = int(round(orig_height * (target_width / orig_width)))
         picture.set_size_request(target_width, target_height)
 
     def apply_zoom_and_resize(self):
         target_width = self.get_target_width()
-        for picture, orig_width, orig_height in self.picture_records:
+        for _fname, picture, orig_width, orig_height in self.picture_records:
             self.update_picture_size_request(picture, orig_width, orig_height, target_width)
 
     def on_window_resized(self, widget, param):
         self.apply_zoom_and_resize()
+
+    def check_and_scroll_to_start_page(self):
+        if not self.start_page or self.has_scrolled_to_start_page:
+            return
+
+        target_width = self.get_target_width()
+        current_y = 0
+        found_y = None
+
+        for idx, (filename, _picture, orig_w, orig_h) in enumerate(self.picture_records):
+            if orig_w > 0 and orig_h > 0:
+                height = int(round(orig_h * (target_width / orig_w)))
+            else:
+                height = 0
+
+            if filename == self.start_page:
+                found_y = current_y
+                break
+
+            current_y += height + BOX_SPACING
+
+        if found_y is not None:
+            self.has_scrolled_to_start_page = True
+            vadj = self.scrolled_window.get_vadjustment()
+            if vadj:
+                GLib.idle_add(lambda: vadj.set_value(found_y))
 
     def poll_folder(self):
         if not os.path.exists(self.target_dir):
@@ -156,6 +227,7 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
 
         new_files = [f for f in valid_images if f not in self.loaded_files]
         if not new_files:
+            self.check_and_scroll_to_start_page()
             return True
 
         target_width = self.get_target_width()
@@ -181,27 +253,33 @@ class MangaReaderWindow(Gtk.ApplicationWindow):
             # Set size request according to current zoom level & target width
             if orig_width > 0 and orig_height > 0:
                 self.update_picture_size_request(picture, orig_width, orig_height, target_width)
-                self.picture_records.append((picture, orig_width, orig_height))
+                self.picture_records.append((filename, picture, orig_width, orig_height))
 
             self.box.append(picture)
             self.loaded_files.add(filename)
 
+        self.check_and_scroll_to_start_page()
         return True
 
 
 class MangaReaderApp(Gtk.Application):
-    def __init__(self, target_dir):
+    def __init__(self, target_dir, start_page=None):
         super().__init__(application_id="org.mangacli.reader")
         self.target_dir = target_dir
+        self.start_page = start_page
 
     def do_activate(self):
-        win = MangaReaderWindow(self, self.target_dir)
+        win = MangaReaderWindow(self, self.target_dir, self.start_page)
         win.present()
 
 
 def main():
-    target_dir = sys.argv[1] if len(sys.argv) > 1 else "."
-    app = MangaReaderApp(target_dir)
+    parser = argparse.ArgumentParser(description="GTK4 Manga Reader")
+    parser.add_argument("dir", nargs="?", default=".", help="Directory containing manga images")
+    parser.add_argument("--start-page", help="Filename of the page to scroll to on start")
+    args = parser.parse_args()
+
+    app = MangaReaderApp(args.dir, args.start_page)
     app.run(None)
 
 

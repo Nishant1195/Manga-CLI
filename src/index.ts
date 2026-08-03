@@ -34,6 +34,7 @@ async function main() {
     let mangaTitle: string;
     let chapters: any[] = [];
     let currentChapterIndex: number = 0;
+    let resumeStartPage: string | undefined = undefined;
 
     if (isContinueFlag) {
       const recent = getMostRecentlyRead();
@@ -45,6 +46,7 @@ async function main() {
       console.log(`Resuming "${recent.mangaTitle}" (${recent.chapterLabel})...`);
       mangaId = recent.mangaId;
       mangaTitle = recent.mangaTitle;
+      resumeStartPage = recent.lastPageFile;
 
       console.log(`Fetching chapters for "${mangaTitle}"...`);
       chapters = await source.getChapters(mangaId);
@@ -125,9 +127,6 @@ async function main() {
 
       console.log(`\nOpening ${chapterLabel}...`);
 
-      // Update reading history on every chapter open
-      saveHistoryEntry(mangaId, mangaTitle, activeChapter.id, chapterLabel);
-
       const pageUrls = await source.getPages(activeChapter.id);
 
       if (!pageUrls || pageUrls.length === 0) {
@@ -139,12 +138,14 @@ async function main() {
       console.log(`Downloading ${pageUrls.length} pages...`);
 
       let viewPromise: Promise<void> | null = null;
+      const startPage = resumeStartPage;
+      resumeStartPage = undefined; // Reset after initial resume
 
       const downloadPromise = downloadPagesProgressive(
         pageUrls,
         destDir,
         () => {
-          viewPromise = viewChapterProgressive(destDir, downloadPromise);
+          viewPromise = viewChapterProgressive(destDir, downloadPromise, startPage);
         },
         50
       );
@@ -153,10 +154,26 @@ async function main() {
 
       if (!viewPromise) {
         // If full cache hit or instant completion
-        viewPromise = viewChapter(destDir);
+        viewPromise = viewChapter(destDir, startPage);
       }
 
       await viewPromise;
+
+      // Check for .last-read-page file written by reader.py on close
+      const lastPageFile = path.join(destDir, ".last-read-page");
+      let activeLastPage: string | undefined = undefined;
+
+      if (fs.existsSync(lastPageFile)) {
+        try {
+          activeLastPage = fs.readFileSync(lastPageFile, "utf8").trim();
+          fs.unlinkSync(lastPageFile);
+        } catch {
+          // Ignore read/unlink error
+        }
+      }
+
+      // Record updated reading history including the active page
+      saveHistoryEntry(mangaId, mangaTitle, activeChapter.id, chapterLabel, activeLastPage);
 
       // Check for navigation signal file written by reader.py
       const signalFile = path.join(destDir, ".chapter-nav-signal");
