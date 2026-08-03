@@ -3,8 +3,13 @@ import * as path from "path";
 
 export function cleanExpiredCache(
   baseDir: string = "/tmp/manga-cli/weebcentral",
-  maxAgeDays: number = 3
+  maxAgeDays: number = 3,
+  persistCache: boolean = false
 ): void {
+  if (persistCache) {
+    return;
+  }
+
   try {
     if (!fs.existsSync(baseDir)) {
       return;

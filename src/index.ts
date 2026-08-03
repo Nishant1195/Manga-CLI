@@ -8,6 +8,54 @@ import { viewChapterProgressive, viewChapter } from "./viewer";
 import { selectFromList } from "./select";
 import { cleanExpiredCache } from "./cache";
 import { saveHistoryEntry, getMostRecentlyRead } from "./history";
+import { loadConfig, updateConfigValue } from "./config";
+
+function printSetupHelp() {
+  console.log("Usage:");
+  console.log("  manga-cli --setup show              Show current configuration");
+  console.log("  manga-cli --setup <key> <value>     Update configuration setting");
+  console.log("");
+  console.log("Valid Keys:");
+  console.log("  concurrency <number>        Download concurrency limit (e.g. 5, 8, 10)");
+  console.log("  persistCache <true|false>   Prevent automatic 3-day cache cleanup");
+  console.log("  waitForFullDownload <true|false> Open reader only after 100% download");
+}
+
+async function handleSetup(): Promise<boolean> {
+  const setupIndex = process.argv.indexOf("--setup");
+  if (setupIndex === -1) {
+    return false;
+  }
+
+  const subArg1 = process.argv[setupIndex + 1];
+  const subArg2 = process.argv[setupIndex + 2];
+
+  if (!subArg1 || subArg1 === "help") {
+    printSetupHelp();
+    return true;
+  }
+
+  if (subArg1 === "show") {
+    const config = loadConfig();
+    console.log(JSON.stringify(config, null, 2));
+    return true;
+  }
+
+  if (subArg1 && subArg2) {
+    try {
+      const updatedConfig = updateConfigValue(subArg1, subArg2);
+      const val = (updatedConfig as any)[subArg1];
+      console.log(`Updated ${subArg1} to ${val}`);
+    } catch (err: any) {
+      console.error(`Error: ${err?.message || String(err)}`);
+      printSetupHelp();
+    }
+    return true;
+  }
+
+  printSetupHelp();
+  return true;
+}
 
 async function askSearchTerm(): Promise<string> {
   const rl = readline.createInterface({
@@ -25,7 +73,13 @@ async function askSearchTerm(): Promise<string> {
 
 async function main() {
   try {
-    cleanExpiredCache();
+    if (await handleSetup()) {
+      return;
+    }
+
+    const config = loadConfig();
+
+    cleanExpiredCache("/tmp/manga-cli/weebcentral", 3, config.persistCache);
 
     const isContinueFlag = process.argv.includes("--continue");
     const source = WeebCentralSource;
@@ -147,7 +201,9 @@ async function main() {
         () => {
           viewPromise = viewChapterProgressive(destDir, downloadPromise, startPage);
         },
-        50
+        50,
+        config.concurrency,
+        config.waitForFullDownload
       );
 
       await downloadPromise;

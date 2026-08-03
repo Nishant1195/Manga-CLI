@@ -20,6 +20,8 @@ export async function downloadPagesProgressive(
   destDir: string,
   onThreshold?: () => void,
   thresholdPercent: number = 50,
+  concurrency: number = 5,
+  waitForFullDownload: boolean = false,
   headers: Record<string, string> = DEFAULT_HEADERS
 ): Promise<string[]> {
   if (!urls || urls.length === 0) {
@@ -28,9 +30,11 @@ export async function downloadPagesProgressive(
 
   fs.mkdirSync(destDir, { recursive: true });
 
+  const effectiveThresholdPercent = waitForFullDownload ? 100 : thresholdPercent;
+
   const total = urls.length;
   const padLength = Math.max(3, String(total).length);
-  const thresholdCount = Math.ceil((total * thresholdPercent) / 100);
+  const thresholdCount = Math.ceil((total * effectiveThresholdPercent) / 100);
 
   const expectedPaths: string[] = urls.map((url, idx) => {
     const parsedUrl = new URL(url);
@@ -53,7 +57,7 @@ export async function downloadPagesProgressive(
   let completedCount = 0;
   let totalBytesDownloaded = 0;
   let thresholdFired = false;
-  const CONCURRENCY = 20;
+  const activeConcurrency = Math.max(1, concurrency);
   const overallStartTime = Date.now();
 
   const downloadSingle = async (index: number, url: string) => {
@@ -98,16 +102,13 @@ export async function downloadPagesProgressive(
       onThreshold
     ) {
       thresholdFired = true;
-      console.log(
-        `\n[DEBUG] onThreshold() firing! completedCount=${completedCount}, thresholdCount=${thresholdCount} (${thresholdPercent}%)`
-      );
       onThreshold();
     }
   };
 
-  for (let i = 0; i < urls.length; i += CONCURRENCY) {
+  for (let i = 0; i < urls.length; i += activeConcurrency) {
     const batch = urls
-      .slice(i, i + CONCURRENCY)
+      .slice(i, i + activeConcurrency)
       .map((url, idx) => downloadSingle(i + idx, url));
     await Promise.all(batch);
   }
@@ -134,7 +135,16 @@ export async function downloadPagesProgressive(
 export async function downloadPages(
   urls: string[],
   destDir: string,
+  concurrency: number = 5,
   headers: Record<string, string> = DEFAULT_HEADERS
 ): Promise<string[]> {
-  return downloadPagesProgressive(urls, destDir, undefined, 50, headers);
+  return downloadPagesProgressive(
+    urls,
+    destDir,
+    undefined,
+    100,
+    concurrency,
+    true,
+    headers
+  );
 }
