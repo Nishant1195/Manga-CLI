@@ -67,7 +67,7 @@ function checkGtkPythonBindings(): CheckResult {
 }
 
 function checkReaderScript(): CheckResult {
-  const readerPath = path.resolve(__dirname, "../reader/reader.py");
+  const readerPath = path.resolve(__dirname, "../../reader/reader.py");
   if (!fs.existsSync(readerPath)) {
     return {
       name: "Reader Script (reader/reader.py)",

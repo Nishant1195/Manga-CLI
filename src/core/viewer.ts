@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawn } from "child_process";
 
-const READER_SCRIPT_PATH = path.resolve(__dirname, "../reader/reader.py");
+const READER_SCRIPT_PATH = path.resolve(__dirname, "../../reader/reader.py");
 
 export async function viewChapter(
   dir: string,

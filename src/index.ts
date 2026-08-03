@@ -3,13 +3,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 import { WeebCentralSource } from "./sources/weebcentral";
-import { downloadPagesProgressive } from "./download";
-import { viewChapterProgressive, viewChapter } from "./viewer";
-import { selectFromList } from "./select";
-import { cleanExpiredCache } from "./cache";
-import { saveHistoryEntry, getMostRecentlyRead } from "./history";
-import { loadConfig, updateConfigValue } from "./config";
-import { runHealthCheck } from "./health";
+import { downloadPagesProgressive } from "./core/download";
+import { viewChapterProgressive, viewChapter } from "./core/viewer";
+import { selectFromList } from "./cli/select";
+import { cleanExpiredCache } from "./core/cache";
+import { saveHistoryEntry, getMostRecentlyRead } from "./core/history";
+import { loadConfig, updateConfigValue } from "./core/config";
+import { runHealthCheck } from "./cli/health";
 
 function printSetupHelp() {
   console.log("Usage:");
