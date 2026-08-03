@@ -108,17 +108,22 @@ The diagnostic command (`manga-cli --health`) automatically validates all system
 
 ## Installation
 
-A one-line curl installer is planned. Currently, install manually by cloning the repository:
+### Automatic One-Line Installer
+
+Install `manga-cli` automatically via the one-line installer (which validates all system dependencies and runs `manga-cli --health` at the end as final verification):
 
 ```bash
-git clone https://github.com/your-username/manga-cli.git
-cd manga-cli
-npm install
+curl -fsSL https://raw.githubusercontent.com/nishant1195/manga-cli/main/install.sh | bash
 ```
 
-To link `manga-cli` as a global command on your system:
+### Manual Installation (Inspected Setup)
+
+If you prefer to inspect the source code before installing:
 
 ```bash
+git clone https://github.com/nishant1195/manga-cli.git
+cd manga-cli
+npm install
 npm link
 ```
 

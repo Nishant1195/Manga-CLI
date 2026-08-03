@@ -15,11 +15,11 @@
   "devDependencies": {
     "@types/cheerio": "^0.22.35",
     "@types/node": "^20.11.0",
-    "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "cheerio": "^1.2.0"
+    "cheerio": "^1.2.0",
+    "tsx": "^4.7.0"
   }
 }
